@@ -31,6 +31,7 @@
   .title-area {
     display: flex;
     align-items: baseline;
+    width: 250px;
   }
   .app-title {
     font-size: 20px;
@@ -45,6 +46,14 @@
     padding: 4px 10px;
     border-radius: 15px;
   }
+  
+  /* タイマーとギャラリー操作部（中央） */
+  .center-area {
+    flex: 1;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+  }
   .timer {
     font-size: 32px;
     font-weight: bold;
@@ -52,6 +61,39 @@
     transition: color 0.2s;
   }
   .timer.red { color: red; }
+  .gallery-controls {
+    display: flex;
+    align-items: center;
+  }
+  .gallery-count {
+    font-size: 20px;
+    font-weight: bold;
+    margin: 0 20px;
+  }
+  
+  /* 右側ボタン部 */
+  .action-area {
+    width: 250px;
+    display: flex;
+    justify-content: flex-end;
+  }
+  button {
+    padding: 12px 20px;
+    font-size: 16px;
+    font-weight: bold;
+    border: none;
+    border-radius: 8px;
+    cursor: pointer;
+    transition: background 0.2s;
+  }
+  .btn-blue { background: #007aff; color: white; }
+  .btn-green { background: #34c759; color: white; }
+  .btn-orange { background: #ff9500; color: white; }
+  .btn-gray { background: #e5e5ea; color: black; margin-left: 10px; }
+  .btn-gray:active { background: #d1d1d6; }
+  .hidden { display: none !important; }
+
+  /* キャンバスとギャラリー画像エリア */
   .canvas-wrapper {
     flex: 1;
     position: relative;
@@ -82,20 +124,12 @@
     top: 0; left: 0;
     touch-action: none;
   }
-  button {
-    padding: 12px 20px;
-    font-size: 16px;
-    font-weight: bold;
-    border: none;
-    border-radius: 8px;
-    cursor: pointer;
-    transition: background 0.2s;
+  #galleryImage {
+    position: absolute;
+    top: 0; left: 0;
+    width: 100%; height: 100%;
+    pointer-events: none; /* 画像表示中も誤動作を防ぐ */
   }
-  .btn-blue { background: #007aff; color: white; }
-  .btn-green { background: #34c759; color: white; }
-  .btn-orange { background: #ff9500; color: white; }
-  .btn-gray { background: #e5e5ea; color: black; margin-left: 10px; }
-  .hidden { display: none !important; }
 </style>
 </head>
 <body>
@@ -107,15 +141,26 @@
       <div class="sheet-count" id="sheetCountDisplay">1 / 10 枚目</div>
     </div>
     
-    <div class="timer" id="timerDisplay">1:00</div>
+    <div class="center-area">
+      <!-- タイマー -->
+      <div class="timer" id="timerDisplay">1:00</div>
+      
+      <!-- 振り返りモード用コントロール（普段は隠す） -->
+      <div class="gallery-controls hidden" id="galleryControls">
+        <button id="prevBtn" class="btn-gray">◀ 前のページ</button>
+        <div class="gallery-count" id="galleryCount">1 / 10</div>
+        <button id="nextBtn" class="btn-gray">次のページ ▶</button>
+      </div>
+    </div>
     
-    <div>
+    <div class="action-area">
       <button id="mainBtn" class="btn-blue">1分スタート</button>
-      <button id="subBtn" class="btn-gray">白紙にする</button>
+      <button id="subBtn" class="btn-gray">やり直す</button>
     </div>
   </div>
 
   <div class="canvas-wrapper">
+    <!-- ガイドライン -->
     <div class="guidelines">
       <div class="header-line">
         <span>タイトル：</span>
@@ -127,7 +172,11 @@
       <div class="bullet">-</div>
       <div class="bullet">-</div>
     </div>
+    
+    <!-- 描画キャンバス -->
     <canvas id="drawCanvas"></canvas>
+    <!-- 振り返り用画像（普段は隠す） -->
+    <img id="galleryImage" class="hidden" src="" alt="保存画像">
   </div>
 </div>
 
@@ -135,8 +184,7 @@
   const canvas = document.getElementById('drawCanvas');
   const ctx = canvas.getContext('2d', { desynchronized: true });
   
-  // ★ズレを完全に無くすための修正★
-  // iPad(Retina)の解像度に合わせてキャンバスのピクセル密度を調整します
+  // Retina対応とズレ防止
   function resize() {
     const rect = canvas.parentElement.getBoundingClientRect();
     const dpr = window.devicePixelRatio || 1;
@@ -154,7 +202,6 @@
   }
   window.addEventListener('resize', resize);
 
-  // ★ペン先の正確な座標を取得する関数★
   function getPos(e) {
     const rect = canvas.getBoundingClientRect();
     return {
@@ -164,7 +211,6 @@
   }
 
   let isDrawing = false;
-
   canvas.addEventListener('pointerdown', (e) => {
     if (e.pointerType !== 'pen') return;
     isDrawing = true;
@@ -173,7 +219,6 @@
     ctx.moveTo(pos.x, pos.y);
     e.preventDefault();
   });
-
   canvas.addEventListener('pointermove', (e) => {
     if (!isDrawing || e.pointerType !== 'pen') return;
     const pos = getPos(e);
@@ -181,39 +226,58 @@
     ctx.stroke();
     e.preventDefault();
   });
-
   canvas.addEventListener('pointerup', (e) => {
     if (e.pointerType !== 'pen') return;
     isDrawing = false;
   });
-
   canvas.addEventListener('pointercancel', () => { isDrawing = false; });
 
-  // ★10枚1セットのロジック管理★
+  // ★10枚1セット＆ギャラリー機能のロジック★
   const MAX_SHEETS = 10;
   let currentSheet = 1;
   let timeLeft = 60;
   let timerInterval = null;
-  
-  // 状態: ready(待機), running(計測中), waiting_next(1分終了後), finished(10枚完了)
+  let savedPages = []; // 書いた画像を保存するメモリ
+  let galleryIndex = 0; // 振り返り時のページ番号
   let appState = 'ready'; 
 
+  // UI要素
   const timerDisplay = document.getElementById('timerDisplay');
   const sheetCountDisplay = document.getElementById('sheetCountDisplay');
   const mainBtn = document.getElementById('mainBtn');
   const subBtn = document.getElementById('subBtn');
+  const galleryControls = document.getElementById('galleryControls');
+  const galleryCount = document.getElementById('galleryCount');
+  const galleryImage = document.getElementById('galleryImage');
 
   function updateUI() {
-    // 枚数表示
+    // 状態が完了（振り返りモード）の場合
     if (appState === 'finished') {
-      sheetCountDisplay.textContent = '10枚完了！';
+      sheetCountDisplay.textContent = '振り返りモード（スクショ用）';
       sheetCountDisplay.style.color = '#ff9500';
-    } else {
-      sheetCountDisplay.textContent = `${currentSheet} / ${MAX_SHEETS} 枚目`;
-      sheetCountDisplay.style.color = '#666';
+      
+      timerDisplay.classList.add('hidden');
+      galleryControls.classList.remove('hidden');
+      canvas.classList.add('hidden');
+      galleryImage.classList.remove('hidden');
+      
+      mainBtn.textContent = '内容を消して最初から';
+      mainBtn.className = 'btn-blue';
+      subBtn.classList.add('hidden');
+      
+      updateGalleryView();
+      return;
     }
 
-    // 時間表示
+    // 描画モード（通常）の場合
+    timerDisplay.classList.remove('hidden');
+    galleryControls.classList.add('hidden');
+    canvas.classList.remove('hidden');
+    galleryImage.classList.add('hidden');
+
+    sheetCountDisplay.textContent = `${currentSheet} / ${MAX_SHEETS} 枚目`;
+    sheetCountDisplay.style.color = '#666';
+
     const m = Math.floor(timeLeft / 60);
     const s = timeLeft % 60;
     timerDisplay.textContent = `${m}:${s.toString().padStart(2, '0')}`;
@@ -224,24 +288,19 @@
       timerDisplay.classList.remove('red');
     }
 
-    // ボタンの切り替え
     if (appState === 'ready') {
       mainBtn.textContent = '1分スタート';
       mainBtn.className = 'btn-blue';
       subBtn.textContent = '白紙にする';
       subBtn.classList.remove('hidden');
     } else if (appState === 'running') {
-      mainBtn.textContent = '書き終わった (次へ)';
+      mainBtn.textContent = '完了して次へ';
       mainBtn.className = 'btn-green';
-      subBtn.textContent = 'このページをやり直す';
+      subBtn.textContent = 'やり直す';
       subBtn.classList.remove('hidden');
     } else if (appState === 'waiting_next') {
-      mainBtn.textContent = '次のページへ (白紙になります)';
+      mainBtn.textContent = '完了して次へ';
       mainBtn.className = 'btn-orange';
-      subBtn.classList.add('hidden'); // 次へ進むしかできないようにする
-    } else if (appState === 'finished') {
-      mainBtn.textContent = 'リセットして最初から';
-      mainBtn.className = 'btn-blue';
       subBtn.classList.add('hidden');
     }
   }
@@ -259,7 +318,6 @@
         timerInterval = null;
         appState = 'waiting_next';
         updateUI();
-        // 時間切れのフラッシュ演出
         document.body.style.backgroundColor = '#ffcccc';
         setTimeout(() => document.body.style.backgroundColor = '#f0f0f0', 300);
       }
@@ -267,27 +325,45 @@
   }
 
   function clearCanvas() {
-    // 描画を消す（キャンバスの解像度サイズでクリア）
     ctx.clearRect(0, 0, canvas.width / (window.devicePixelRatio || 1), canvas.height / (window.devicePixelRatio || 1));
   }
 
-  // メインボタン（青/緑/オレンジ）の動作
+  function saveCurrentPage() {
+    // 現在の書いた線を画像としてメモリに保存
+    savedPages.push(canvas.toDataURL('image/png'));
+  }
+
+  function goToNextSheet() {
+    saveCurrentPage(); // 画面の絵を保存
+    
+    if (currentSheet < MAX_SHEETS) {
+      currentSheet++;
+      appState = 'ready'; // 次のページの待機状態へ
+      timeLeft = 60;
+      clearCanvas();
+      updateUI();
+    } else {
+      appState = 'finished'; // 10枚終わったらギャラリーモードへ
+      galleryIndex = 0;
+      updateUI();
+    }
+  }
+
   mainBtn.addEventListener('click', () => {
     if (appState === 'ready') {
       startTimer();
     } 
     else if (appState === 'running') {
-      // 1分経たずに書き終わって次へ行く場合
       clearInterval(timerInterval);
       timerInterval = null;
       goToNextSheet();
     }
     else if (appState === 'waiting_next') {
-      // 時間切れ後、次へ進むボタンを押した場合
       goToNextSheet();
     }
     else if (appState === 'finished') {
-      // 全セット完了後、リセットする
+      // 完全にリセット
+      savedPages = [];
       currentSheet = 1;
       appState = 'ready';
       timeLeft = 60;
@@ -296,12 +372,10 @@
     }
   });
 
-  // サブボタン（グレー）の動作
   subBtn.addEventListener('click', () => {
     if (appState === 'ready') {
       clearCanvas();
     } else if (appState === 'running') {
-      // タイマーを止めて現在のページをやり直す
       clearInterval(timerInterval);
       timerInterval = null;
       appState = 'ready';
@@ -311,19 +385,27 @@
     }
   });
 
-  function goToNextSheet() {
-    if (currentSheet < MAX_SHEETS) {
-      currentSheet++;
-      appState = 'ready';
-      timeLeft = 60;
-      clearCanvas();
-      updateUI();
-    } else {
-      appState = 'finished';
-      timeLeft = 0;
-      updateUI();
+  // ギャラリー（振り返り）操作
+  function updateGalleryView() {
+    if (savedPages.length > 0) {
+      galleryImage.src = savedPages[galleryIndex];
+      galleryCount.textContent = `${galleryIndex + 1} / ${savedPages.length}`;
     }
   }
+
+  document.getElementById('prevBtn').addEventListener('click', () => {
+    if (galleryIndex > 0) {
+      galleryIndex--;
+      updateGalleryView();
+    }
+  });
+
+  document.getElementById('nextBtn').addEventListener('click', () => {
+    if (galleryIndex < savedPages.length - 1) {
+      galleryIndex++;
+      updateGalleryView();
+    }
+  });
 
   // 初期化
   resize();
