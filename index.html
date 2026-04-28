@@ -1,0 +1,333 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>ZeroSecMemo Web</title>
+<style>
+  body {
+    margin: 0;
+    overflow: hidden;
+    font-family: sans-serif;
+    touch-action: none;
+    background-color: #f0f0f0;
+  }
+  .container {
+    width: 100vw;
+    height: 100vh;
+    display: flex;
+    flex-direction: column;
+    background-color: white;
+  }
+  .toolbar {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 10px 20px;
+    background: #fff;
+    box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+    z-index: 10;
+  }
+  .title-area {
+    display: flex;
+    align-items: baseline;
+  }
+  .app-title {
+    font-size: 20px;
+    font-weight: bold;
+  }
+  .sheet-count {
+    font-size: 16px;
+    color: #666;
+    margin-left: 15px;
+    font-weight: bold;
+    background: #f0f0f0;
+    padding: 4px 10px;
+    border-radius: 15px;
+  }
+  .timer {
+    font-size: 32px;
+    font-weight: bold;
+    font-family: monospace;
+    transition: color 0.2s;
+  }
+  .timer.red { color: red; }
+  .canvas-wrapper {
+    flex: 1;
+    position: relative;
+    background: white;
+  }
+  .guidelines {
+    position: absolute;
+    top: 0; left: 0; right: 0; bottom: 0;
+    pointer-events: none;
+    padding: 30px 50px;
+  }
+  .header-line {
+    display: flex;
+    justify-content: space-between;
+    color: #ccc;
+    font-size: 20px;
+    border-bottom: 2px solid #eee;
+    padding-bottom: 10px;
+    margin-bottom: 40px;
+  }
+  .bullet {
+    color: #ccc;
+    font-size: 28px;
+    margin-bottom: 50px;
+  }
+  canvas {
+    position: absolute;
+    top: 0; left: 0;
+    touch-action: none;
+  }
+  button {
+    padding: 12px 20px;
+    font-size: 16px;
+    font-weight: bold;
+    border: none;
+    border-radius: 8px;
+    cursor: pointer;
+    transition: background 0.2s;
+  }
+  .btn-blue { background: #007aff; color: white; }
+  .btn-green { background: #34c759; color: white; }
+  .btn-orange { background: #ff9500; color: white; }
+  .btn-gray { background: #e5e5ea; color: black; margin-left: 10px; }
+  .hidden { display: none !important; }
+</style>
+</head>
+<body>
+
+<div class="container">
+  <div class="toolbar">
+    <div class="title-area">
+      <div class="app-title">ゼロ秒思考</div>
+      <div class="sheet-count" id="sheetCountDisplay">1 / 10 枚目</div>
+    </div>
+    
+    <div class="timer" id="timerDisplay">1:00</div>
+    
+    <div>
+      <button id="mainBtn" class="btn-blue">1分スタート</button>
+      <button id="subBtn" class="btn-gray">白紙にする</button>
+    </div>
+  </div>
+
+  <div class="canvas-wrapper">
+    <div class="guidelines">
+      <div class="header-line">
+        <span>タイトル：</span>
+        <span>年　月　日</span>
+      </div>
+      <div class="bullet">-</div>
+      <div class="bullet">-</div>
+      <div class="bullet">-</div>
+      <div class="bullet">-</div>
+      <div class="bullet">-</div>
+    </div>
+    <canvas id="drawCanvas"></canvas>
+  </div>
+</div>
+
+<script>
+  const canvas = document.getElementById('drawCanvas');
+  const ctx = canvas.getContext('2d', { desynchronized: true });
+  
+  // ★ズレを完全に無くすための修正★
+  // iPad(Retina)の解像度に合わせてキャンバスのピクセル密度を調整します
+  function resize() {
+    const rect = canvas.parentElement.getBoundingClientRect();
+    const dpr = window.devicePixelRatio || 1;
+    
+    canvas.width = rect.width * dpr;
+    canvas.height = rect.height * dpr;
+    canvas.style.width = `${rect.width}px`;
+    canvas.style.height = `${rect.height}px`;
+    
+    ctx.scale(dpr, dpr);
+    ctx.lineCap = 'round';
+    ctx.lineJoin = 'round';
+    ctx.lineWidth = 2.5;
+    ctx.strokeStyle = 'black';
+  }
+  window.addEventListener('resize', resize);
+
+  // ★ペン先の正確な座標を取得する関数★
+  function getPos(e) {
+    const rect = canvas.getBoundingClientRect();
+    return {
+      x: e.clientX - rect.left,
+      y: e.clientY - rect.top
+    };
+  }
+
+  let isDrawing = false;
+
+  canvas.addEventListener('pointerdown', (e) => {
+    if (e.pointerType !== 'pen') return;
+    isDrawing = true;
+    const pos = getPos(e);
+    ctx.beginPath();
+    ctx.moveTo(pos.x, pos.y);
+    e.preventDefault();
+  });
+
+  canvas.addEventListener('pointermove', (e) => {
+    if (!isDrawing || e.pointerType !== 'pen') return;
+    const pos = getPos(e);
+    ctx.lineTo(pos.x, pos.y);
+    ctx.stroke();
+    e.preventDefault();
+  });
+
+  canvas.addEventListener('pointerup', (e) => {
+    if (e.pointerType !== 'pen') return;
+    isDrawing = false;
+  });
+
+  canvas.addEventListener('pointercancel', () => { isDrawing = false; });
+
+  // ★10枚1セットのロジック管理★
+  const MAX_SHEETS = 10;
+  let currentSheet = 1;
+  let timeLeft = 60;
+  let timerInterval = null;
+  
+  // 状態: ready(待機), running(計測中), waiting_next(1分終了後), finished(10枚完了)
+  let appState = 'ready'; 
+
+  const timerDisplay = document.getElementById('timerDisplay');
+  const sheetCountDisplay = document.getElementById('sheetCountDisplay');
+  const mainBtn = document.getElementById('mainBtn');
+  const subBtn = document.getElementById('subBtn');
+
+  function updateUI() {
+    // 枚数表示
+    if (appState === 'finished') {
+      sheetCountDisplay.textContent = '10枚完了！';
+      sheetCountDisplay.style.color = '#ff9500';
+    } else {
+      sheetCountDisplay.textContent = `${currentSheet} / ${MAX_SHEETS} 枚目`;
+      sheetCountDisplay.style.color = '#666';
+    }
+
+    // 時間表示
+    const m = Math.floor(timeLeft / 60);
+    const s = timeLeft % 60;
+    timerDisplay.textContent = `${m}:${s.toString().padStart(2, '0')}`;
+    
+    if (timeLeft === 0 && appState === 'waiting_next') {
+      timerDisplay.classList.add('red');
+    } else {
+      timerDisplay.classList.remove('red');
+    }
+
+    // ボタンの切り替え
+    if (appState === 'ready') {
+      mainBtn.textContent = '1分スタート';
+      mainBtn.className = 'btn-blue';
+      subBtn.textContent = '白紙にする';
+      subBtn.classList.remove('hidden');
+    } else if (appState === 'running') {
+      mainBtn.textContent = '書き終わった (次へ)';
+      mainBtn.className = 'btn-green';
+      subBtn.textContent = 'このページをやり直す';
+      subBtn.classList.remove('hidden');
+    } else if (appState === 'waiting_next') {
+      mainBtn.textContent = '次のページへ (白紙になります)';
+      mainBtn.className = 'btn-orange';
+      subBtn.classList.add('hidden'); // 次へ進むしかできないようにする
+    } else if (appState === 'finished') {
+      mainBtn.textContent = 'リセットして最初から';
+      mainBtn.className = 'btn-blue';
+      subBtn.classList.add('hidden');
+    }
+  }
+
+  function startTimer() {
+    appState = 'running';
+    timeLeft = 60;
+    updateUI();
+    
+    timerInterval = setInterval(() => {
+      timeLeft--;
+      updateUI();
+      if (timeLeft <= 0) {
+        clearInterval(timerInterval);
+        timerInterval = null;
+        appState = 'waiting_next';
+        updateUI();
+        // 時間切れのフラッシュ演出
+        document.body.style.backgroundColor = '#ffcccc';
+        setTimeout(() => document.body.style.backgroundColor = '#f0f0f0', 300);
+      }
+    }, 1000);
+  }
+
+  function clearCanvas() {
+    // 描画を消す（キャンバスの解像度サイズでクリア）
+    ctx.clearRect(0, 0, canvas.width / (window.devicePixelRatio || 1), canvas.height / (window.devicePixelRatio || 1));
+  }
+
+  // メインボタン（青/緑/オレンジ）の動作
+  mainBtn.addEventListener('click', () => {
+    if (appState === 'ready') {
+      startTimer();
+    } 
+    else if (appState === 'running') {
+      // 1分経たずに書き終わって次へ行く場合
+      clearInterval(timerInterval);
+      timerInterval = null;
+      goToNextSheet();
+    }
+    else if (appState === 'waiting_next') {
+      // 時間切れ後、次へ進むボタンを押した場合
+      goToNextSheet();
+    }
+    else if (appState === 'finished') {
+      // 全セット完了後、リセットする
+      currentSheet = 1;
+      appState = 'ready';
+      timeLeft = 60;
+      clearCanvas();
+      updateUI();
+    }
+  });
+
+  // サブボタン（グレー）の動作
+  subBtn.addEventListener('click', () => {
+    if (appState === 'ready') {
+      clearCanvas();
+    } else if (appState === 'running') {
+      // タイマーを止めて現在のページをやり直す
+      clearInterval(timerInterval);
+      timerInterval = null;
+      appState = 'ready';
+      timeLeft = 60;
+      clearCanvas();
+      updateUI();
+    }
+  });
+
+  function goToNextSheet() {
+    if (currentSheet < MAX_SHEETS) {
+      currentSheet++;
+      appState = 'ready';
+      timeLeft = 60;
+      clearCanvas();
+      updateUI();
+    } else {
+      appState = 'finished';
+      timeLeft = 0;
+      updateUI();
+    }
+  }
+
+  // 初期化
+  resize();
+  updateUI();
+</script>
+</body>
+</html>
