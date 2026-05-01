@@ -135,34 +135,40 @@
     pointer-events: none;
   }
   
-  /* 10枚まとめ表示用グリッド */
+  /* ★修正箇所：10枚まとめ表示用グリッド（1画面に収める） */
   #gridGallery {
     position: absolute;
     top: 0; left: 0; right: 0; bottom: 0;
     background: #e9e9eb;
     display: grid;
-    grid-template-columns: repeat(2, 1fr); /* 2列で表示 */
-    gap: 15px;
-    padding: 20px;
-    overflow-y: auto; /* ここだけスクロール可能に */
-    touch-action: pan-y; /* 指でのスクロールを許可 */
+    grid-template-columns: repeat(5, 1fr); /* 横に5列 */
+    grid-template-rows: repeat(2, 1fr); /* 縦に2行 */
+    gap: 8px; /* 隙間 */
+    padding: 10px;
+    box-sizing: border-box;
+    overflow: hidden; /* スクロールを禁止して1画面に固定 */
   }
   .grid-item-wrapper {
     background: white;
-    padding: 10px;
-    border-radius: 8px;
+    padding: 4px;
+    border-radius: 6px;
     box-shadow: 0 1px 3px rgba(0,0,0,0.2);
+    display: flex;
+    flex-direction: column;
   }
   .grid-title {
-    font-size: 16px;
+    font-size: 12px;
     font-weight: bold;
     color: #666;
-    margin-bottom: 5px;
+    margin-bottom: 2px;
     text-align: center;
   }
   .grid-img {
     width: 100%;
+    height: calc(100% - 18px);
+    object-fit: contain; /* はみ出さずに全体を表示 */
     border: 1px solid #eee;
+    box-sizing: border-box;
   }
 </style>
 </head>
@@ -333,7 +339,6 @@
       timeLeft--;
       updateUI();
       if (timeLeft <= 0) {
-        // ★ 1分経ったら強制的に次のページへ
         goToNextSheet();
       }
     }, 1000);
@@ -344,19 +349,16 @@
   }
 
   function goToNextSheet() {
-    // 今の画面を保存
     savedPages.push(canvas.toDataURL('image/png'));
     clearInterval(timerInterval);
     timerInterval = null;
-    flashScreen(); // 画面をフラッシュさせる
+    flashScreen(); 
     
     if (currentSheet < MAX_SHEETS) {
       currentSheet++;
       clearCanvas();
-      // ★ 強制的に次のタイマーを自動スタート
       startTimer();
     } else {
-      // 10枚終わったら振り返りへ
       appState = 'finished';
       galleryIndex = 0;
       isGridView = false;
@@ -369,11 +371,9 @@
       startTimer();
     } 
     else if (appState === 'running') {
-      // 1分経たずに早く書き終わった場合は強制的に次へ進める
       goToNextSheet();
     }
     else if (appState === 'finished') {
-      // 全消去してリセット
       savedPages = [];
       currentSheet = 1;
       appState = 'ready';
@@ -384,7 +384,6 @@
   });
 
   subBtn.addEventListener('click', () => {
-    // 今のページをやり直す（タイマーを60秒に戻して再開）
     if (appState === 'running') {
       clearCanvas();
       timeLeft = 60;
@@ -392,15 +391,14 @@
     }
   });
 
-  // ======= ギャラリー機能（単体・一覧） =======
   function updateGalleryView() {
     if (isGridView) {
-      // 10枚一覧モード
+      // ★10枚一覧モード
       galleryImage.classList.add('hidden');
       document.querySelectorAll('.single-only').forEach(el => el.classList.add('hidden'));
       toggleViewBtn.textContent = '1枚ずつ見る';
       
-      gridGallery.innerHTML = ''; // 一旦空にする
+      gridGallery.innerHTML = ''; 
       savedPages.forEach((dataUrl, idx) => {
         const wrapper = document.createElement('div');
         wrapper.className = 'grid-item-wrapper';
@@ -410,7 +408,7 @@
       gridGallery.classList.remove('hidden');
       
     } else {
-      // 1枚ずつモード
+      // ★1枚ずつモード
       gridGallery.classList.add('hidden');
       document.querySelectorAll('.single-only').forEach(el => el.classList.remove('hidden'));
       toggleViewBtn.textContent = '10枚一覧で見る';
